@@ -154,14 +154,14 @@
             boostMaxInternal: 4.8,
             cycleMin: 24000, 
             cycleMax: 25000, 
-            boostDurMin: 14000, 
-            boostDurMax: 15000
+            boostDurMin: 5000, 
+            boostDurMax: 9000
         };
 
         let isAutopilot = true;
         let speed = CONFIG.minInternal;
         let targetSpeed = CONFIG.minInternal;
-        let nextActionTime = Date.now() + 24000; 
+        let nextActionTime = Date.now() + 7000; 
         let isBoosting = false;
 
         // UI Refs
