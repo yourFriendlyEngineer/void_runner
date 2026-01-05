@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Project View</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Syncopate:wght@400;700&display=swap');
+
+        body {
+            margin: 0; background: #080808; color: white;
+            font-family: 'Manrope', sans-serif;
+            overflow: hidden; height: 100dvh; width: 100vw;
+            position: fixed; user-select: none; 
+            touch-action: none; -webkit-tap-highlight-color: transparent;
+            cursor: grab;
+        }
+        body:active { cursor: grabbing; }
+
+        .curtain-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 9999; will-change: transform;
+            transform: translateY(0%); transition: transform 1s cubic-bezier(0.8, 0, 0.1, 1);
+        }
+        .curtain-overlay.open { transform: translateY(-100%); }
+
+        .content-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            transition: transform 1s cubic-bezier(0.2, 1, 0.3, 1), opacity 0.8s ease;
+            transform: translateY(10vh) scale(0.96); opacity: 0;
+        }
+        body.loaded .content-layer { transform: translateY(0) scale(1); opacity: 1; }
+        body.exiting .content-layer { transform: translateY(10vh) scale(0.96); opacity: 0; }
+
+        .nav-top { position: fixed; top: 0; left: 0; padding: 40px; z-index: 100; mix-blend-mode: exclusion; }
+        .close-btn { 
+            pointer-events: auto; text-decoration: none; color: white; 
+            font-family: 'Syncopate', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+            display: flex; align-items: center; gap: 12px; transition: opacity 0.3s; padding: 10px 0; cursor: pointer;
+        }
+        .close-btn:hover { opacity: 0.6; }
+
+        .counter-box {
+            position: fixed; bottom: 40px; left: 40px;
+            z-index: 100; pointer-events: none; mix-blend-mode: exclusion;
+            font-family: 'Syncopate', sans-serif; font-size: 11px; letter-spacing: 0.1em;
+            font-weight: 700; opacity: 0.6; border-left: 2px solid rgba(255,255,255,0.3); padding-left: 15px;
+            font-variant-numeric: tabular-nums; 
+        }
+
+        .timeline-container { 
+            position: fixed; bottom: 45px; left: 50%; transform: translateX(-50%); 
+            display: flex; gap: 8px; z-index: 100; pointer-events: none; align-items: center;
+        }
+        .time-segment { width: 4px; height: 4px; background: rgba(255,255,255,0.3); border-radius: 10px; transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1); }
+        .time-segment.active { width: 24px; height: 4px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+
+        .loader { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 11px; letter-spacing: 0.2em; opacity: 0.7; z-index: 201; font-family: monospace; }
+
+        /* --- LAYOUT --- */
+        .gallery-viewport { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: flex; align-items: center; 
+            overflow: hidden; 
+            perspective: 1000px;
+        }
+        
+        .gallery-track { 
+            display: flex; align-items: center; 
+            padding-left: 50vw; padding-right: 50vw; 
+            will-change: transform; 
+            transform-style: preserve-3d;
+            transform: translate3d(0,0,0);
+            cursor: grab; touch-action: pan-x; 
+        }
+        .gallery-track:active { cursor: grabbing; }
+
+        /* --- SLIDE --- */
+        .slide {
+            position: relative; flex-shrink: 0;
+            height: 70vh; 
+            width: auto; 
+            margin: 0 4vw; /* Desktop margins */
+            
+            contain: layout paint;
+            will-change: transform, opacity;
+            
+            transform: scale(0.9) translateZ(0); 
+            opacity: 0.4; filter: grayscale(100%);
+            transition: transform 0.6s cubic-bezier(0.2, 1, 0.2, 1), opacity 0.6s ease, filter 0.6s ease;
+            
+            display: flex; align-items: center; justify-content: center;
+            /* ARTIFACT FIX: No background color, purely transparent */
+            background: none; 
+        }
+
+        .slide canvas { 
+            display: block; height: 100%; width: auto; 
+            box-shadow: 0 30px 60px rgba(0,0,0,0.5); 
+            pointer-events: none; image-rendering: high-quality;
+            transform: translateZ(0); opacity: 0; transition: opacity 0.5s ease;
+        }
+        .slide canvas.ready { opacity: 1; }
+        .slide.active { transform: scale(1.0) translateZ(0); opacity: 1; filter: grayscale(0%); z-index: 10; }
+
+        /* MOBILE ADJUSTMENTS */
+        @media (max-width: 768px) {
+            .nav-top { padding: 25px; }
+            .counter-box { bottom: 25px; left: 25px; }
+            .timeline-container { bottom: 30px; }
+            
+            .slide { 
+                margin: 0 10px; 
+                height: auto; 
+                /* Fixed width: screen - 40px (20px each side) */
+                width: calc(100vw - 40px); 
+            }
+            
+            .slide canvas { 
+                height: auto; width: 100%; 
+                max-height: 60dvh; 
+                object-fit: contain;
+            } 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="curtain-overlay" id="mainCurtain"></div>
+    <div class="loader" id="loader">SCANNING...</div>
+
+    <div class="content-layer">
+        <nav class="nav-top"><div class="close-btn" onclick="handleExit()">✕ CLOSE</div></nav>
+        <div class="counter-box" id="counter">00 / 00</div>
+        <div class="gallery-viewport"><div class="gallery-track" id="track"></div></div>
+        <div class="timeline-container" id="timeline"></div>
+    </div>
+
+    <script src="config.js"></script>
+
+<script>
+    const START_TIME = performance.now();
+    const track = document.getElementById('track');
+    const timeline = document.getElementById('timeline');
+    const loader = document.getElementById('loader');
+    const counter = document.getElementById('counter');
+    const curtain = document.getElementById('mainCurtain');
+
+    const params = new URLSearchParams(window.location.search);
+    const folder = params.get('id');
+    if (!folder) window.location.href = 'index.html';
+
+    let slidesData = [];
+    let isLoaded = false;
+
+    async function scanFolder() {
+        const PROBE_LIMIT = 20; 
+        const promises = [];
+
+        for (let i = 1; i <= PROBE_LIMIT; i++) {
+            const num = String(i).padStart(2, '0');
+            const jpgSrc = `images/${folder}/${num}.jpg`;
+            const pngSrc = `images/${folder}/${num}.png`;
+            
+            const p = new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve({ src: jpgSrc, w: img.naturalWidth, h: img.naturalHeight, index: i });
+                img.onerror = () => {
+                    const pngImg = new Image();
+                    pngImg.onload = () => resolve({ src: pngSrc, w: pngImg.naturalWidth, h: pngImg.naturalHeight, index: i });
+                    pngImg.onerror = () => resolve(null);
+                    pngImg.src = pngSrc;
+                };
+                img.src = jpgSrc;
+            });
+            promises.push(p);
+        }
+
+        const results = await Promise.all(promises);
+        const validImages = results.filter(r => r !== null).sort((a, b) => a.index - b.index);
+
+        if (validImages.length === 0) { alert("No images found!"); return; }
+
+        buildStructure(validImages);
+        initGallery();
+        processImagesSequentially(validImages);
+    }
+
+    function buildStructure(images) {
+        const isMobile = window.innerWidth < 768;
+        
+        images.forEach(data => {
+            const ratio = data.w / data.h;
+            const slide = document.createElement('div');
+            slide.className = 'slide';
+            
+            let calcWidth;
+            if (isMobile) {
+                // Calculation matches CSS: 100vw - 40px
+                calcWidth = window.innerWidth - 40; 
+            } else {
+                const vhHeight = window.innerHeight * 0.70;
+                calcWidth = Math.min(Math.floor(vhHeight * ratio), 1000);
+                slide.style.width = `${calcWidth}px`;
+            }
+
+            track.appendChild(slide);
+            
+            const seg = document.createElement('div');
+            seg.className = 'time-segment';
+            timeline.appendChild(seg);
+            
+            slidesData.push({
+                el: slide,
+                width: calcWidth,
+                center: 0,
+                src: data.src,
+                natW: data.w,
+                natH: data.h
+            });
+        });
+        
+        calculateGeometry();
+    }
+
+    async function processImagesSequentially(images) {
+        for (let i = 0; i < images.length; i++) {
+            const data = slidesData[i];
+            const imgObj = new Image();
+            imgObj.crossOrigin = "Anonymous";
+            imgObj.src = data.src;
+            await new Promise(r => imgObj.onload = r);
+            
+            const MAX_TEXTURE = 1600;
+            const scale = Math.min(1, MAX_TEXTURE / Math.max(data.natW, data.natH));
+            const w = Math.floor(data.natW * scale);
+            const h = Math.floor(data.natH * scale);
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(imgObj, 0, 0, w, h);
+            
+            canvas.className = 'ready';
+            data.el.appendChild(canvas);
+            
+            // Background is already set to 'none' in CSS, so artifacts won't appear
+            
+            await new Promise(r => requestAnimationFrame(r));
+        }
+    }
+
+    function calculateGeometry() {
+        if (!slidesData.length) return;
+        const style = window.getComputedStyle(slidesData[0].el);
+        const marginLeft = parseFloat(style.marginLeft) || 0;
+        const marginRight = parseFloat(style.marginRight) || 0;
+        const gap = marginLeft + marginRight;
+        
+        let currentX = 0;
+        slidesData.forEach((item) => {
+            item.center = currentX + marginLeft + (item.width / 2);
+            currentX += item.width + gap;
+        });
+    }
+
+    function initGallery() {
+        if(isLoaded) return;
+        isLoaded = true;
+        loader.style.opacity = '0';
+        setTimeout(() => loader.style.display = 'none', 500);
+        
+        window.addEventListener('resize', () => { location.reload(); });
+        slidesData.forEach((item, i) => {
+            item.el.addEventListener('click', () => { if (!isMovingFast) goToSlide(i); });
+        });
+
+        updateUI(0);
+        goToSlide(0, true);
+        
+        setTimeout(() => { curtain.classList.add('open'); }, 50);
+        setTimeout(() => { document.body.classList.add('loaded'); }, 300);
+        animate();
+    }
+
+    let state = { current: 0, target: 0, isDragging: false, startX: 0, dragStartCurrent: 0, currentIndex: 0 };
+    let isMovingFast = false;
+    const lerp = (s, e, f) => s * (1 - f) + e * f;
+
+    function animate() {
+        const lerpFactor = state.isDragging ? 0.15 : 0.1;
+        state.current = lerp(state.current, state.target, lerpFactor);
+        
+        const diff = Math.abs(state.current - state.target);
+        isMovingFast = diff > 3;
+
+        if (diff < 0.05 && !state.isDragging) state.current = state.target;
+
+        const renderX = Math.round(state.current * 100) / 100;
+        track.style.transform = `translate3d(${renderX}px, 0, 0)`;
+
+        const virtualCenter = -renderX;
+        let closestIndex = state.currentIndex;
+        let minDistance = Infinity;
+
+        for (let i = 0; i < slidesData.length; i++) {
+            const item = slidesData[i];
+            const dist = Math.abs(virtualCenter - item.center);
+            if (dist < minDistance) { minDistance = dist; closestIndex = i; }
+            const isActive = dist < item.width * 0.6;
+            if (isActive) { if (!item.isAct) { item.el.classList.add('active'); item.isAct = true; } } 
+            else { if (item.isAct) { item.el.classList.remove('active'); item.isAct = false; } }
+        }
+
+        if (!state.isDragging && closestIndex !== state.currentIndex) {
+            state.currentIndex = closestIndex;
+            updateUI(closestIndex);
+        }
+        requestAnimationFrame(animate);
+    }
+
+    function updateUI(index) {
+        const segments = document.querySelectorAll('.time-segment');
+        segments.forEach((seg, i) => {
+            if (i === index) seg.classList.add('active');
+            else seg.classList.remove('active');
+        });
+        const currentNum = String(index + 1).padStart(2, '0');
+        const totalNum = String(slidesData.length).padStart(2, '0');
+        counter.innerText = `${currentNum} / ${totalNum}`;
+    }
+
+    function goToSlide(index, instant = false) {
+        if (!slidesData.length) return;
+        if (index < 0) index = 0;
+        if (index >= slidesData.length) index = slidesData.length - 1;
+        state.currentIndex = index;
+        state.target = -slidesData[index].center;
+        if (instant) state.current = state.target;
+        updateUI(index);
+    }
+
+    window.handleExit = function() {
+        curtain.classList.remove('open');
+        document.body.classList.add('exiting');
+        setTimeout(() => { window.location.href = 'index.html'; }, 900);
+    }
+
+    // CONTROLS
+    let wheelAccumulator = 0; let isWheeling = false;
+    window.addEventListener('wheel', (e) => {
+        if (isWheeling) return;
+        wheelAccumulator += e.deltaY;
+        if (Math.abs(wheelAccumulator) > 30) { 
+            isWheeling = true; 
+            if (wheelAccumulator > 0) goToSlide(state.currentIndex + 1);
+            else goToSlide(state.currentIndex - 1);
+            wheelAccumulator = 0;
+            setTimeout(() => { isWheeling = false; }, 400); 
+        }
+        clearTimeout(window.wheelResetTimer);
+        window.wheelResetTimer = setTimeout(() => { wheelAccumulator = 0; }, 100);
+    }, { passive: true });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goToSlide(state.currentIndex + 1);
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') goToSlide(state.currentIndex - 1);
+        if (e.key === 'Escape') handleExit();
+    });
+
+    const onStart = (x) => { state.isDragging = true; state.startX = x; state.dragStartCurrent = state.current; };
+    const onMove = (x) => { 
+        if (!state.isDragging) return; 
+        const diff = x - state.startX; 
+        state.target = state.dragStartCurrent + diff * 2.5; 
+    };
+    const onEnd = () => { 
+        state.isDragging = false; 
+        const virtualCenter = -state.target;
+        let closest = 0; let minD = Infinity;
+        slidesData.forEach((item, i) => {
+            const d = Math.abs(virtualCenter - item.center);
+            if (d < minD) { minD = d; closest = i; }
+        });
+        goToSlide(closest);
+    };
+
+    window.addEventListener('mousedown', e => onStart(e.clientX));
+    window.addEventListener('touchstart', e => onStart(e.touches[0].clientX), { passive: true });
+    window.addEventListener('mousemove', e => onMove(e.clientX));
+    window.addEventListener('touchmove', e => onMove(e.touches[0].clientX), { passive: true });
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchend', onEnd);
+    window.addEventListener('mouseleave', () => { if(state.isDragging) onEnd(); });
+
+    scanFolder();
+</script>
+</body>
+</html>
